@@ -13,22 +13,13 @@ function isFresh(date, ttlMins) {
 
 exports.getWeather = async (req, res) => {
   try {
-    // ✅ FIX: read from both query and body
-    let {
-      latitude,
-      longitude,
-      city,
-      userId,
-      userName,
-    } = { ...req.query, ...req.body };
+    let { latitude, longitude, city, userId, userName } = { ...req.query, ...req.body };
 
-    // If lat/lon not provided but city is present → geocode
     if ((!latitude || !longitude) && city) {
       try {
         const geo = await axios.get(
           `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}`
         );
-
         if (geo.data.results && geo.data.results.length > 0) {
           latitude = geo.data.results[0].latitude;
           longitude = geo.data.results[0].longitude;
@@ -47,7 +38,6 @@ exports.getWeather = async (req, res) => {
       return res.status(400).json({ error: "Invalid latitude/longitude" });
     }
 
-    // Check cache
     let cached = null;
     try {
       cached = await WeatherCache.findOne({ latitude: lat, longitude: lon })
@@ -57,10 +47,8 @@ exports.getWeather = async (req, res) => {
       console.warn("Cache skipped:", err.message);
     }
 
-    const userToken =
-      (req.headers.authorization || "").replace(/^Bearer\s*/i, "") || null;
+    const userToken = (req.headers.authorization || "").replace(/^Bearer\s*/i, "") || null;
 
-    // Save search history (non-blocking)
     SearchHistory.create({
       latitude: lat,
       longitude: lon,
@@ -75,21 +63,15 @@ exports.getWeather = async (req, res) => {
       return res.json({ source: "cache", ...cached.data });
     }
 
-    // Fetch from Open-Meteo
     const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`;
     const response = await axios.get(url);
-
     const data = response.data;
 
-    // Save cache
-    WeatherCache.create({
-      latitude: lat,
-      longitude: lon,
-      data,
-    }).catch(() => {});
+    WeatherCache.create({ latitude: lat, longitude: lon, data }).catch(() => {});
 
     res.json({ source: "open-meteo", ...data });
   } catch (error) {
+    console.error("Weather error:", error);
     res.status(500).json({ error: "Failed to fetch weather data" });
   }
 };
