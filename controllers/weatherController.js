@@ -1,9 +1,6 @@
 const axios = require("axios");
-const mongoose = require("mongoose");
 const WeatherCache = require("../models/WeatherCache");
 const SearchHistory = require("../models/SearchHistory");
-
-mongoose.set("bufferCommands", false);
 
 const CACHE_TTL_MINUTES = Number(process.env.CACHE_TTL_MINUTES || 30);
 
@@ -13,65 +10,44 @@ function isFresh(date, ttlMins) {
 
 exports.getWeather = async (req, res) => {
   try {
-    let { latitude, longitude, city, userId, userName } = { ...req.query, ...req.body };
+    const { city } = req.body;
+    let latitude, longitude;
 
-    if ((!latitude || !longitude) && city) {
-      try {
-        const geo = await axios.get(
-          `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}`
-        );
-        if (geo.data.results && geo.data.results.length > 0) {
-          latitude = geo.data.results[0].latitude;
-          longitude = geo.data.results[0].longitude;
-        } else {
-          return res.status(404).json({ error: "City not found" });
-        }
-      } catch (err) {
-        return res.status(500).json({ error: "Failed to fetch coordinates" });
-      }
-    }
+    if (!city) return res.status(400).json({ error: "City required" });
 
-    const lat = Number(latitude);
-    const lon = Number(longitude);
+    const geo = await axios.get(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}`
+    );
+    if (!geo.data.results?.length)
+      return res.status(404).json({ error: "City not found" });
 
-    if (isNaN(lat) || isNaN(lon)) {
-      return res.status(400).json({ error: "Invalid latitude/longitude" });
-    }
+    latitude = geo.data.results[0].latitude;
+    longitude = geo.data.results[0].longitude;
 
-    let cached = null;
-    try {
-      cached = await WeatherCache.findOne({ latitude: lat, longitude: lon })
-        .sort({ createdAt: -1 })
-        .lean();
-    } catch (err) {
-      console.warn("Cache skipped:", err.message);
-    }
+    const cached = await WeatherCache.findOne({ latitude, longitude })
+      .sort({ createdAt: -1 })
+      .lean();
 
-    const userToken = (req.headers.authorization || "").replace(/^Bearer\s*/i, "") || null;
-
-    SearchHistory.create({
-      latitude: lat,
-      longitude: lon,
-      cityName: city || null,
-      userToken,
-      userId: userId || null,
-      userName: userName || null,
-      ip: req.ip,
-    }).catch(() => {});
-
-    if (cached && isFresh(cached.createdAt, CACHE_TTL_MINUTES)) {
+    if (cached && isFresh(cached.createdAt, CACHE_TTL_MINUTES))
       return res.json({ source: "cache", ...cached.data });
-    }
 
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&timezone=auto`;
-    const response = await axios.get(url);
+    const response = await axios.get(
+      `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&timezone=auto`
+    );
     const data = response.data;
 
-    WeatherCache.create({ latitude: lat, longitude: lon, data }).catch(() => {});
+    await WeatherCache.create({ latitude, longitude, data });
+    await SearchHistory.create({
+      userId: req.user.id,
+      userName: req.user.email,
+      cityName: city,
+      latitude,
+      longitude,
+    });
 
-    res.json({ source: "open-meteo", ...data });
-  } catch (error) {
-    console.error("Weather error:", error);
-    res.status(500).json({ error: "Failed to fetch weather data" });
+    res.json({ source: "live", ...data });
+  } catch (err) {
+    console.error("Weather error:", err);
+    res.status(500).json({ error: "Failed to fetch weather" });
   }
 };
