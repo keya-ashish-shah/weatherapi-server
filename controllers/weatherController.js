@@ -152,7 +152,7 @@ exports.getWeather = async (req, res) => {
             const decoded = jwt.verify(token, JWT_SECRET);
             userId = decoded.id || decoded._id || undefined;
             userName = decoded.email || decoded.username || undefined;
-            userToken = token; // only store if token verifies
+            userToken = token; 
           } catch (err) {
             // invalid token: do not record user info or token
             userId = undefined;

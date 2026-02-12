@@ -9,16 +9,16 @@ function validateRegister(req, res, next) {
     name: Joi.string().trim().min(1).required().messages({
       "string.empty": "Name is required",
       "any.required": "Name is required",
-    }),
+    }), 
     email: Joi.string().email().lowercase().required().messages({
       "string.email": "Email must be a valid email address",
       "any.required": "Email is required",
     }),
-    dob: Joi.string()
+    dob: Joi.string() 
       .pattern(/^\d{4}-\d{2}-\d{2}$/)
       .required()
       .custom((value, helpers) => {
-        const parts = value.split("-").map(Number);
+        const parts = value.split("-").map(Number); 
         if (parts.length !== 3) return helpers.message("Date of birth must be in YYYY-MM-DD format");
         const [y, m, d] = parts;
         const currentYear = new Date().getFullYear();
@@ -115,3 +115,4 @@ module.exports = {
   validateLogin,
   validateWeather,
 };
+ 
