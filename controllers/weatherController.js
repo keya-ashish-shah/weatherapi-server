@@ -1,6 +1,8 @@
 const axios = require("axios");
 const WeatherCache = require("../models/WeatherCache");
 const SearchHistory = require("../models/SearchHistory");
+const jwt = require("jsonwebtoken");
+const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey";
 
 const CACHE_TTL_MINUTES = Number(process.env.CACHE_TTL_MINUTES || 30);
 const COORD_PRECISION = Number(process.env.COORD_PRECISION || 3);
@@ -137,13 +139,39 @@ exports.getWeather = async (req, res) => {
     }
 
     try {
-      await SearchHistory.create({
-        userId: req.user ? (req.user._id || req.user.id) : undefined,
-        userName: req.user ? req.user.email : undefined,
+      // Only record authenticated user info if the Authorization header contains a valid JWT.
+      let userId;
+      let userName;
+      let userToken;
+      const authHeader = req.headers && (req.headers.authorization || req.headers.Authorization);
+      if (authHeader && typeof authHeader === "string") {
+        const parts = authHeader.split(" ");
+        const token = parts.length === 2 && parts[0].toLowerCase() === "bearer" ? parts[1] : null;
+        if (token) {
+          try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            userId = decoded.id || decoded._id || undefined;
+            userName = decoded.email || decoded.username || undefined;
+            userToken = token; // only store if token verifies
+          } catch (err) {
+            // invalid token: do not record user info or token
+            userId = undefined;
+            userName = undefined;
+            userToken = undefined;
+          }
+        }
+      }
+
+      const historyDoc = {
         cityName: city,
         latitude,
         longitude,
-      });
+      };
+      if (userId) historyDoc.userId = userId;
+      if (userName) historyDoc.userName = userName;
+      if (userToken) historyDoc.userToken = userToken;
+
+      await SearchHistory.create(historyDoc);
     } catch (err) {
       console.error("SearchHistory save failed:", err.message);
     }
